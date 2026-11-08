@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Chess — Auto Move (Fixed)</title>
+<style>
+  body { background:#1a1a1a; color:#ddd; font-family:system-ui,sans-serif; display:flex; flex-direction:column; align-items:center; padding:20px; }
+  #board { display:grid; grid-template-columns:repeat(8,64px); grid-template-rows:repeat(8,64px); border:2px solid #555; }
+  .sq { width:64px; height:64px; display:flex; align-items:center; justify-content:center; font-size:44px; cursor:pointer; user-select:none; }
+  .light { background:#e8d9b8; } .dark { background:#8b6f47; }
+  .sel { box-shadow:inset 0 0 0 3px #f0c040; }
+  .hint { box-shadow:inset 0 0 0 3px #40a0f0; }
+  #controls { margin-top:16px; display:flex; gap:10px; }
+  button { padding:10px 20px; font-size:16px; background:#2a2a2a; color:#ddd; border:1px solid #555; border-radius:6px; cursor:pointer; }
+  button:hover { background:#3a3a3a; }
+  #status { margin-top:12px; font-size:18px; min-height:24px; }
+</style>
+</head>
+<body>
+<div id="status">Ход белых</div>
+<div id="board"></div>
+<div id="controls">
+  <button id="autoBtn">Автоход</button>
+  <button id="resetBtn">Заново</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+<script>
+const game = new Chess();
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+let selected = null;
+
+const pieces = { p:'♟', r:'♜', n:'♞', b:'♝', q:'♛', k:'♚', P:'♙', R:'♖', N:'♘', B:'♗', Q:'♕', K:'♔' };
+
+function render() {
+  boardEl.innerHTML = '';
+  const board = game.board();
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = document.createElement('div');
+      const isLight = (r + c) % 2 === 0;
+      sq.className = 'sq ' + (isLight ? 'light' : 'dark');
+      const square = String.fromCharCode(97 + c) + (8 - r);
+      sq.dataset.square = square;
+      const piece = board[r][c];
+      if (piece) {
+        const key = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
+        sq.textContent = pieces[key];
+      }
+      if (selected === square) sq.classList.add('sel');
+      if (selected && game.moves({ square: selected, verbose: true }).some(m => m.to === square))
+        sq.classList.add('hint');
+      sq.onclick = () => onSquareClick(square);
+      boardEl.appendChild(sq);
+    }
+  }
+  updateStatus();
+}
+
+function updateStatus() {
+  if (game.game_over()) {
+    if (game.in_checkmate()) statusEl.textContent = 'Мат! ' + (game.turn() === 'w' ? 'Чёрные' : 'Белые') + ' победили';
+    else if (game.in_stalemate()) statusEl.textContent = 'Пат — ничья';
+    else if (game.in_draw()) statusEl.textContent = 'Ничья';
+    return;
+  }
+  statusEl.textContent = 'Ход ' + (game.turn() === 'w' ? 'белых' : 'чёрных') + (game.in_check() ? ' (шах!)' : '');
+}
+
+function onSquareClick(square) {
+  if (game.game_over()) return;
+  const piece = game.get(square);
+  if (selected) {
+    const move = game.move({ from: selected, to: square, promotion: 'q' });
+    if (move) { selected = null; render(); return; }
+    selected = null;
+  }
+  if (piece && piece.color === game.turn()) selected = square;
+  render();
+}
+
+// --- AI: Исправленный minimax с alpha-beta ---
+const values = { p:100, n:320, b:330, r:500, q:900, k:20000 };
+
+function evaluate() {
+  let score = 0;
+  const board = game.board();
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = board[r][c];
+      if (!sq) continue;
+      const v = values[sq.type];
+      score += sq.color === 'w' ? v : -v;
+    }
+  }
+  return score;
+}
+
+function minimax(depth, alpha, beta, maximizing) {
+  if (depth === 0 || game.game_over()) {
+    return evaluate();
+  }
+  
+  const moves = game.moves({ verbose: true });
+  
+  if (maximizing) {
+    let best = -Infinity;
+    for (const m of moves) {
+      game.move(m);
+      best = Math.max(best, minimax(depth - 1, alpha, beta, false));
+      game.undo();
+      alpha = Math.max(alpha, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  } else {
+    let border = Infinity;
+    let best = Infinity;
+    for (const m of moves) {
+      game.move(m);
+      best = Math.min(best, minimax(depth - 1, alpha, beta, true));
+      game.undo();
+      beta = Math.min(beta, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+function bestMove() {
+  const moves = game.moves({ verbose: true });
+  if (!moves.length) return null;
+  
+  const maximizing = game.turn() === 'w';
+  let best = maximizing ? -Infinity : Infinity;
+  let chosen = moves[Math.floor(Math.random() * moves.length)]; // Случайный дефолтный ход на случай равных оценок
+  
+  for (const m of moves) {
+    game.move(m);
+    // Передаем глубину 2 (суммарно просчет на 3 полухода вперед вместе с текущим)
+    const score = minimax(2, -Infinity, Infinity, !maximizing);
+    game.undo();
+    
+    if (maximizing) {
+      if (score > best) {
+        best = score;
+        chosen = m;
+      }
+    } else {
+      if (score < best) {
+        best = score;
+        chosen = m;
+      }
+    }
+  }
+  return chosen;
+}
+
+document.getElementById('autoBtn').onclick = () => {
+  if (game.game_over()) return;
+  const m = bestMove();
+  if (m) { game.move(m); selected = null; render(); }
+};
+
+document.getElementById('resetBtn').onclick = () => {
+  game.reset(); selected = null; render();
+};
+
+render();
+</script>
+</body>
+</html>
