@@ -1,0 +1,6 @@
+{
+  "appId": "com.chessauto.app",
+  "appName": "Chess Auto",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
